@@ -1,107 +1,342 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ShortCircuit</title>
+  <title>ShortCircuit - Arrow Flow</title>
+
   <style>
     body {
+      margin: 0;
+      overflow: hidden;
       font-family: Arial;
-      text-align: center;
-      background: #0d1b2a;
+      background: black;
       color: white;
-      padding: 20px;
     }
-    button {
-      margin: 10px;
+
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 260px;
+      background: rgba(0,0,0,0.6);
       padding: 10px;
+      border-radius: 10px;
+      z-index: 10;
     }
+
+    button { margin: 3px; }
+    canvas { display: block; }
   </style>
 </head>
 
 <body>
 
-<h1>ShortCircuit</h1>
+<div id="ui">
+  <button onclick="mode='series'">Series</button>
+  <button onclick="mode='parallel'">Parallel</button>
 
-<button onclick="showInfo()">Show Circuit Info</button>
+  <button onclick="triggerBreak(1)">Toggle Break R1</button>
+  <button onclick="triggerBreak(2)">Toggle Break R2</button>
 
-<h3>Mode</h3>
-<button onclick="setMode('series')">Series</button>
-<button onclick="setMode('parallel')">Parallel</button>
-<button onclick="brokenR1 = !brokenR1; update()">Break R1</button>
+  <hr>
 
-<h3>Voltage: <span id="vVal">10</span> V</h3>
-<input type="range" id="voltage" min="1" max="20" value="10" oninput="update()">
+  V:
+  <input id="v" type="range" min="1" max="20" value="10"><br>
 
-<h3>Resistor 1: <span id="r1Val">5</span> Ω</h3>
-<input type="range" id="r1" min="1" max="20" value="5" oninput="update()">
+  R1:
+  <input id="r1" type="range" min="1" max="20" value="5"><br>
 
-<h3>Resistor 2: <span id="r2Val">5</span> Ω</h3>
-<input type="range" id="r2" min="1" max="20" value="5" oninput="update()">
+  R2:
+  <input id="r2" type="range" min="1" max="20" value="5"><br>
 
-<hr>
+  <hr>
 
-<h2>Total Resistance: <span id="R"></span> Ω</h2>
-<h2>Total Current: <span id="I"></span> A</h2>
-<h3>Fan Speed: <span id="fan"></span></h3>
+  R: <span id="Rout"></span> Ω<br>
+  I: <span id="Iout"></span> A<br>
+
+  <hr>
+  <div id="echo">Click wire or fan</div>
+</div>
+
+<canvas id="c"></canvas>
 
 <script>
+const c = document.getElementById("c");
+const ctx = c.getContext("2d");
+
+c.width = innerWidth;
+c.height = innerHeight;
+
+window.onresize = () => {
+  c.width = innerWidth;
+  c.height = innerHeight;
+};
+
 let mode = "series";
 let brokenR1 = false;
+let brokenR2 = false;
 
-// GLOBAL VARIABLES (IMPORTANT FIX)
-let V = 10;
-let R1 = 5;
-let R2 = 5;
-let R_total = 0;
-let I = 0;
+let r1BreakAnim = 0;
+let r2BreakAnim = 0;
 
-function setMode(m) {
-  mode = m;
-  update();
-}
+let V=10, R1=5, R2=5, R=0, I=0;
 
-function update() {
-  V = Number(document.getElementById("voltage").value);
-  R1 = Number(document.getElementById("r1").value);
-  R2 = Number(document.getElementById("r2").value);
+let wires = [];
+let flowT = 0;
+let fanAngle = 0;
 
-  if (brokenR1) R1 = 9999;
+/* ---------------- BREAK TRIGGER ---------------- */
+function triggerBreak(n){
 
-  document.getElementById("vVal").innerText = V;
-  document.getElementById("r1Val").innerText = R1;
-  document.getElementById("r2Val").innerText = R2;
-
-  if (mode === "series") {
-    R_total = R1 + R2;
-  } else {
-    R_total = 1 / (1/R1 + 1/R2);
+  if(n === 1){
+    r1BreakAnim = 1;
+    setTimeout(()=> brokenR1 = !brokenR1, 200);
   }
 
-  I = V / R_total;
-
-  document.getElementById("R").innerText = R_total.toFixed(2);
-  document.getElementById("I").innerText = I.toFixed(2);
-
-  let fan = "";
-  if (I < 0.3) fan = "Slow";
-  else if (I < 0.7) fan = "Medium";
-  else fan = "Fast";
-
-  document.getElementById("fan").innerText = fan;
+  if(n === 2){
+    r2BreakAnim = 1;
+    setTimeout(()=> brokenR2 = !brokenR2, 200);
+  }
 }
 
-function showInfo() {
-  alert(
-    "Circuit Info\n\n" +
-    "Mode: " + mode + "\n" +
-    "Voltage: " + V + "V\n" +
-    "R1: " + R1 + "Ω\n" +
-    "R2: " + R2 + "Ω\n" +
-    "Total Resistance: " + R_total.toFixed(2) + "Ω\n" +
-    "Current: " + I.toFixed(2) + "A"
-  );
+/* ---------------- PHYSICS ---------------- */
+function compute(){
+
+  V = +v.value;
+  R1 = +r1.value;
+  R2 = +r2.value;
+
+  if(brokenR1) R1 = 9999;
+  if(brokenR2) R2 = 9999;
+
+  R = (mode==="series")
+    ? R1 + R2
+    : 1 / (1/R1 + 1/R2);
+
+  I = V / R;
+
+  Rout.innerText = R.toFixed(2);
+  Iout.innerText = I.toFixed(2);
 }
 
-update();
+/* ---------------- CIRCUIT ---------------- */
+function drawCircuit(){
+
+  let midY = c.height/2;
+  let left = 120;
+  let right = c.width - 200;
+
+  wires = [];
+
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(0,150,255,0.8)";
+  ctx.beginPath();
+
+  if(mode==="series"){
+
+    addWire(left,midY,left+200,midY-80);
+    addWire(left+200,midY-80,left+400,midY+80);
+    addWire(left+400,midY+80,left+600,midY-60);
+    addWire(left+600,midY-60,right,midY);
+
+  } else {
+
+    addWire(left,midY,left+200,midY);
+    addWire(left+200,midY,left+300,midY-160);
+    addWire(left+300,midY-160,right,midY-160);
+    addWire(left+200,midY,left+300,midY+160);
+    addWire(left+300,midY+160,right,midY+160);
+  }
+
+  ctx.stroke();
+
+  ctx.fillStyle="white";
+  ctx.fillRect(80,midY-25,10,50);
+
+  drawResistor(c.width/2,midY-120,"R1",R1,brokenR1,r1BreakAnim);
+  drawResistor(c.width/2,midY+100,"R2",R2,brokenR2,r2BreakAnim);
+}
+
+function addWire(x1,y1,x2,y2){
+  wires.push({x1,y1,x2,y2});
+  ctx.moveTo(x1,y1);
+  ctx.lineTo(x2,y2);
+}
+
+/* ---------------- FLOW ---------------- */
+function drawFlow(){
+
+  if(!isFinite(I) || I <= 0) return;
+
+  let speed = 0.002 + I * 0.01;
+  flowT += speed;
+
+  for(let w of wires){
+
+    for(let i=0;i<6;i++){
+
+      let t = (flowT + i*0.15) % 1;
+
+      let x = w.x1 + (w.x2 - w.x1)*t;
+      let y = w.y1 + (w.y2 - w.y1)*t;
+
+      drawArrow(x,y,w);
+    }
+  }
+}
+
+/* ---------------- ARROW ---------------- */
+function drawArrow(x,y,w){
+
+  let dx = w.x2 - w.x1;
+  let dy = w.y2 - w.y1;
+  let ang = Math.atan2(dy,dx);
+
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(ang);
+
+  ctx.fillStyle = "yellow";
+  ctx.beginPath();
+  ctx.moveTo(8,0);
+  ctx.lineTo(-6,-4);
+  ctx.lineTo(-6,4);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
+/* ---------------- RESISTOR (WITH BREAK ANIMATION) ---------------- */
+function drawResistor(x,y,label,val,broken,anim){
+
+  ctx.save();
+
+  let shakeX = (Math.random()-0.5) * anim * 8;
+  let shakeY = (Math.random()-0.5) * anim * 6;
+
+  ctx.translate(shakeX,shakeY);
+
+  let heat = Math.min(I/5,1);
+
+  let flicker = 1 - anim * 0.4;
+
+  ctx.globalAlpha = 1 - anim * 0.3;
+
+  ctx.fillStyle = broken
+    ? `rgb(${120*flicker},${120*flicker},120)`
+    : `rgb(255,${80+heat*150},80)`;
+
+  ctx.fillRect(x,y,80,25);
+
+  ctx.globalAlpha = 1;
+
+  ctx.fillStyle="white";
+  ctx.font="12px Arial";
+  ctx.fillText(label + (broken ? " (BROKEN)" : "=" + val + "Ω"), x+5, y+17);
+
+  if(anim > 0.1){
+    ctx.strokeStyle="black";
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(x+10,y+5);
+    ctx.lineTo(x+70,y+20);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/* ---------------- FAN ---------------- */
+function drawFan(){
+
+  let fx = c.width - 120;
+  let fy = c.height/2;
+
+  fanAngle += I * 0.15;
+
+  ctx.save();
+  ctx.translate(fx,fy);
+  ctx.rotate(fanAngle);
+
+  ctx.strokeStyle="cyan";
+  ctx.lineWidth=4;
+
+  for(let i=0;i<4;i++){
+    ctx.rotate(Math.PI/2);
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.lineTo(30,10);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  ctx.fillStyle="white";
+  ctx.fillText("FAN",fx-10,fy+50);
+}
+
+/* ---------------- CLICK ---------------- */
+c.onclick = (e)=>{
+
+  let mx = e.clientX;
+  let my = e.clientY;
+
+  let fx = c.width - 120;
+  let fy = c.height/2;
+
+  if(Math.hypot(mx-fx,my-fy) < 40){
+    echo.innerText = `FAN SPEED: ${(I*10).toFixed(2)} | RPM ${(I*120).toFixed(0)}`;
+    return;
+  }
+
+  for(let w of wires){
+    if(distToLine(mx,my,w.x1,w.y1,w.x2,w.y2) < 8){
+      echo.innerText =
+        `WIRE → V:${V}V | I:${I.toFixed(2)}A | R:${R.toFixed(2)}Ω`;
+      return;
+    }
+  }
+
+  echo.innerText = "Click wire or fan";
+};
+
+function distToLine(px,py,x1,y1,x2,y2){
+
+  let A = px-x1, B = py-y1;
+  let C = x2-x1, D = y2-y1;
+
+  let dot = A*C + B*D;
+  let len = C*C + D*D;
+
+  let t = len ? dot/len : -1;
+
+  let xx,yy;
+
+  if(t<0){xx=x1;yy=y1;}
+  else if(t>1){xx=x2;yy=y2;}
+  else{xx=x1+t*C;yy=y1+t*D;}
+
+  return Math.hypot(px-xx,py-yy);
+}
+
+/* ---------------- LOOP ---------------- */
+function loop(){
+
+  requestAnimationFrame(loop);
+
+  r1BreakAnim *= 0.92;
+  r2BreakAnim *= 0.92;
+
+  compute();
+
+  ctx.clearRect(0,0,c.width,c.height);
+
+  drawCircuit();
+  drawFlow();
+  drawFan();
+}
+
+loop();
 </script>
 
 </body>
