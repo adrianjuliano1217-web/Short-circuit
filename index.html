@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ShortCircuit</title>
+  <style>
+    body {
+      font-family: Arial;
+      text-align: center;
+      background: #0d1b2a;
+      color: white;
+      padding: 20px;
+    }
+    button {
+      margin: 10px;
+      padding: 10px;
+    }
+  </style>
+</head>
+
+<body>
+
+<h1>ShortCircuit</h1>
+
+<button onclick="showInfo()">Show Circuit Info</button>
+
+<h3>Mode</h3>
+<button onclick="setMode('series')">Series</button>
+<button onclick="setMode('parallel')">Parallel</button>
+<button onclick="brokenR1 = !brokenR1; update()">Break R1</button>
+
+<h3>Voltage: <span id="vVal">10</span> V</h3>
+<input type="range" id="voltage" min="1" max="20" value="10" oninput="update()">
+
+<h3>Resistor 1: <span id="r1Val">5</span> Ω</h3>
+<input type="range" id="r1" min="1" max="20" value="5" oninput="update()">
+
+<h3>Resistor 2: <span id="r2Val">5</span> Ω</h3>
+<input type="range" id="r2" min="1" max="20" value="5" oninput="update()">
+
+<hr>
+
+<h2>Total Resistance: <span id="R"></span> Ω</h2>
+<h2>Total Current: <span id="I"></span> A</h2>
+<h3>Fan Speed: <span id="fan"></span></h3>
+
+<script>
+let mode = "series";
+let brokenR1 = false;
+
+// GLOBAL VARIABLES (IMPORTANT FIX)
+let V = 10;
+let R1 = 5;
+let R2 = 5;
+let R_total = 0;
+let I = 0;
+
+function setMode(m) {
+  mode = m;
+  update();
+}
+
+function update() {
+  V = Number(document.getElementById("voltage").value);
+  R1 = Number(document.getElementById("r1").value);
+  R2 = Number(document.getElementById("r2").value);
+
+  if (brokenR1) R1 = 9999;
+
+  document.getElementById("vVal").innerText = V;
+  document.getElementById("r1Val").innerText = R1;
+  document.getElementById("r2Val").innerText = R2;
+
+  if (mode === "series") {
+    R_total = R1 + R2;
+  } else {
+    R_total = 1 / (1/R1 + 1/R2);
+  }
+
+  I = V / R_total;
+
+  document.getElementById("R").innerText = R_total.toFixed(2);
+  document.getElementById("I").innerText = I.toFixed(2);
+
+  let fan = "";
+  if (I < 0.3) fan = "Slow";
+  else if (I < 0.7) fan = "Medium";
+  else fan = "Fast";
+
+  document.getElementById("fan").innerText = fan;
+}
+
+function showInfo() {
+  alert(
+    "Circuit Info\n\n" +
+    "Mode: " + mode + "\n" +
+    "Voltage: " + V + "V\n" +
+    "R1: " + R1 + "Ω\n" +
+    "R2: " + R2 + "Ω\n" +
+    "Total Resistance: " + R_total.toFixed(2) + "Ω\n" +
+    "Current: " + I.toFixed(2) + "A"
+  );
+}
+
+update();
+</script>
+
+</body>
+</html>
