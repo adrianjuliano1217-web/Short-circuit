@@ -27,6 +27,7 @@
     button { margin: 3px; }
     canvas { display: block; }
     input[type="range"] { width: 100%; }
+
     #infoBox {
       display: none;
       margin-top: 10px;
@@ -121,6 +122,7 @@ let I1 = 0, I2 = 0, I3 = 0;
 let fanAngle = 0;
 let flowPhases = {};
 let wirePaths = [];
+let resistorHits = [];
 let geom = null;
 
 function setMode(m) {
@@ -219,6 +221,18 @@ function drawGrid() {
   ctx.restore();
 }
 
+function drawTitle() {
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.font = "bold 34px Arial";
+  ctx.fillStyle = "#ff8c1a";
+  ctx.shadowColor = "#ff8c1a";
+  ctx.shadowBlur = 18;
+  ctx.fillText("ShortCircuit", c.width / 2, 18);
+  ctx.restore();
+}
+
 function buildGeometry() {
   const leftX = Math.max(130, c.width * 0.12);
   const rightX = c.width - Math.max(150, c.width * 0.12);
@@ -231,6 +245,7 @@ function buildGeometry() {
   const branch3Y = topY + (bottomY - topY) * 0.78;
 
   const resistorW = 76;
+  const resistorH = 26;
 
   const s1X = leftX + (rightX - leftX) * 0.22;
   const s2X = leftX + (rightX - leftX) * 0.50;
@@ -238,7 +253,7 @@ function buildGeometry() {
 
   return {
     leftX, rightX, topY, bottomY, midY, branch1Y, branch2Y, branch3Y,
-    resistorW,
+    resistorW, resistorH,
     s1X, s2X, s3X
   };
 }
@@ -319,6 +334,54 @@ function addPath(name, points, current, kind) {
   wirePaths.push({ name, points, current, kind });
 }
 
+function addResistorHit(name, x, y, w, h, rot = 0) {
+  resistorHits.push({ name, x, y, w, h, rot });
+}
+
+function resistorMeta(name) {
+  if (name === "R1") return { value: R1, broken: brokenR1 };
+  if (name === "R2") return { value: R2, broken: brokenR2 };
+  return { value: R3, broken: brokenR3 };
+}
+
+function hitResistor(mx, my) {
+  for (const r of resistorHits) {
+    const dx = mx - r.x;
+    const dy = my - r.y;
+
+    const cos = Math.cos(-r.rot);
+    const sin = Math.sin(-r.rot);
+
+    const rx = dx * cos - dy * sin;
+    const ry = dx * sin + dy * cos;
+
+    if (Math.abs(rx) <= r.w / 2 && Math.abs(ry) <= r.h / 2) {
+      return r.name;
+    }
+  }
+  return null;
+}
+
+function currentInfoByResistor(name) {
+  const { value, broken } = resistorMeta(name);
+
+  if (broken) {
+    return `${name} → BROKEN / OPEN CIRCUIT
+Resistance: Open circuit
+Current: 0 A`;
+  }
+
+  if (mode === "series") {
+    return `${name} → Series resistor
+Resistance: ${fmt(value)} Ω
+Current through it: ${fmt(I)} A`;
+  }
+
+  return `${name} → Parallel branch
+Resistance: ${fmt(value)} Ω
+Branch current: ${fmt(V / value)} A`;
+}
+
 function flowDensityForCurrent(current) {
   const p = Math.min(Math.max(current, 0) / 5, 1);
   return 3 + Math.round(p * 4);
@@ -377,14 +440,14 @@ function drawFlow() {
   }
 }
 
-function drawWirePath(points, width, color, shadowColor, alpha) {
+function drawWirePath(points, width, color, shadowColor) {
   if (!points || points.length < 2) return;
 
   ctx.save();
   ctx.shadowBlur = 12;
   ctx.shadowColor = shadowColor || "rgba(0,200,255,0.8)";
   ctx.lineWidth = width || 6;
-  ctx.strokeStyle = color || `rgba(0,170,255,${alpha ?? 0.92})`;
+  ctx.strokeStyle = color || "rgba(0,170,255,0.92)";
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
@@ -431,8 +494,8 @@ function drawBattery(x, y) {
 
   ctx.fillStyle = "yellow";
   ctx.font = "bold 13px Arial";
-  ctx.textAlign = "right";
-  ctx.fillText(`V = ${V.toFixed(0)}V`, x - 10, y + 5);
+  ctx.textAlign = "left";
+  ctx.fillText(`V = ${V.toFixed(0)}V`, x - 62, y + 5);
 
   ctx.restore();
 }
@@ -511,7 +574,7 @@ function drawResistorBox(x, y, label, value, broken, rot = 0) {
 }
 
 function drawSeriesScene(g) {
-  const { leftX, rightX, topY, bottomY, midY, s1X, s2X, s3X, resistorW } = g;
+  const { leftX, rightX, topY, bottomY, midY, s1X, s2X, s3X, resistorW, resistorH } = g;
 
   const seriesTop = [
     { x: leftX, y: topY },
@@ -558,6 +621,10 @@ function drawSeriesScene(g) {
   drawResistorBox(s2X, topY, "R2", R2, brokenR2);
   drawResistorBox(s3X, topY, "R3", R3, brokenR3);
 
+  addResistorHit("R1", s1X, topY, resistorW, resistorH, 0);
+  addResistorHit("R2", s2X, topY, resistorW, resistorH, 0);
+  addResistorHit("R3", s3X, topY, resistorW, resistorH, 0);
+
   drawBattery(leftX - 42, midY);
   drawFan(rightX + 44, midY);
 
@@ -570,43 +637,57 @@ function drawSeriesScene(g) {
 }
 
 function drawParallelScene(g) {
-  const { leftX, rightX, topY, bottomY, midY, branch1Y, branch2Y, branch3Y, resistorW } = g;
+  const { leftX, rightX, topY, bottomY, midY, branch1Y, branch2Y, branch3Y, resistorW, resistorH } = g;
 
   const x1 = leftX + (rightX - leftX) * 0.25;
   const x2 = leftX + (rightX - leftX) * 0.50;
   const x3 = leftX + (rightX - leftX) * 0.75;
 
-  const topRail = [
+  const batteryX = leftX - 42;
+  const fanX = rightX + 44;
+
+  const batteryTop = { x: batteryX + 14, y: midY - 18 };
+  const batteryBottom = { x: batteryX + 14, y: midY + 18 };
+
+  const fanJoinTop = { x: rightX + 16, y: midY - 18 };
+  const fanJoinBottom = { x: rightX + 16, y: midY + 18 };
+
+  const outerMain = [
+    batteryTop,
+    { x: leftX, y: midY - 18 },
     { x: leftX, y: topY },
-    { x: rightX, y: topY }
-  ];
-  const bottomRail = [
+    { x: rightX, y: topY },
+    fanJoinTop,
+    { x: rightX, y: midY - 18 },
+    { x: rightX, y: midY + 18 },
+    fanJoinBottom,
     { x: rightX, y: bottomY },
-    { x: leftX, y: bottomY }
+    { x: leftX, y: bottomY },
+    { x: leftX, y: midY + 18 },
+    batteryBottom
   ];
 
   const branch1 = [
     { x: x1, y: topY },
     { x: x1, y: bottomY }
   ];
+
   const branch2 = [
     { x: x2, y: topY },
     { x: x2, y: bottomY }
   ];
+
   const branch3 = [
     { x: x3, y: topY },
     { x: x3, y: bottomY }
   ];
 
-  addPath("topRail", topRail, I, "rail");
+  addPath("outerMain", outerMain, I, "rail");
   addPath("branch1", branch1, I1, "branch");
   addPath("branch2", branch2, I2, "branch");
   addPath("branch3", branch3, I3, "branch");
-  addPath("bottomRail", bottomRail, I, "return");
 
-  drawWirePath(topRail, 6, "rgba(0,160,255,0.96)", "rgba(0,200,255,0.8)");
-  drawWirePath(bottomRail, 6, "rgba(0,160,255,0.96)", "rgba(0,200,255,0.8)");
-
+  drawWirePath(outerMain, 6, "rgba(0,160,255,0.96)", "rgba(0,200,255,0.8)");
   drawWirePath(branch1, 5, "rgba(0,160,255,0.96)", "rgba(0,200,255,0.8)");
   drawWirePath(branch2, 5, "rgba(0,160,255,0.96)", "rgba(0,200,255,0.8)");
   drawWirePath(branch3, 5, "rgba(0,160,255,0.96)", "rgba(0,200,255,0.8)");
@@ -627,28 +708,55 @@ function drawParallelScene(g) {
   drawResistorBox(x2, midY, "R2", R2, brokenR2, Math.PI / 2);
   drawResistorBox(x3, midY, "R3", R3, brokenR3, Math.PI / 2);
 
-  drawBattery(leftX - 42, midY);
-  drawFan(rightX + 44, midY);
+  addResistorHit("R1", x1, midY, resistorW, resistorH, Math.PI / 2);
+  addResistorHit("R2", x2, midY, resistorW, resistorH, Math.PI / 2);
+  addResistorHit("R3", x3, midY, resistorW, resistorH, Math.PI / 2);
+
+  drawBattery(batteryX, midY);
+  drawFan(fanX, midY);
 
   ctx.save();
   ctx.fillStyle = "rgba(255,255,255,0.88)";
   ctx.font = "12px Arial";
   ctx.textAlign = "left";
   ctx.fillText(`I total = ${fmt(I)} A`, leftX + 18, topY - 18);
-  ctx.fillText(`I1 = ${fmt(I1)} A`, rightX - 82, topY + 18);
-  ctx.fillText(`I2 = ${fmt(I2)} A`, rightX - 82, midY + 18);
-  ctx.fillText(`I3 = ${fmt(I3)} A`, rightX - 82, bottomY - 18);
+  ctx.fillText(`I1 = ${fmt(I1)} A`, rightX - 82, branch1Y - 16);
+  ctx.fillText(`I2 = ${fmt(I2)} A`, rightX - 82, branch2Y - 16);
+  ctx.fillText(`I3 = ${fmt(I3)} A`, rightX - 82, branch3Y - 16);
   ctx.restore();
 }
 
 function currentInfoByPath(name) {
   if (mode === "series") {
+    if (I === 0 || !isFinite(R)) {
+      return `SERIES → OPEN CIRCUIT
+Total resistance: Open circuit
+Total current: 0 A`;
+    }
+
     return `SERIES → V:${fmt(V)}V | I:${fmt(I)}A | R:${fmt(R)}Ω`;
   }
 
-  if (name === "branch1") return `BRANCH 1 → V:${fmt(V)}V | I1:${fmt(I1)}A | R1:${fmt(R1)}Ω`;
-  if (name === "branch2") return `BRANCH 2 → V:${fmt(V)}V | I2:${fmt(I2)}A | R2:${fmt(R2)}Ω`;
-  if (name === "branch3") return `BRANCH 3 → V:${fmt(V)}V | I3:${fmt(I3)}A | R3:${fmt(R3)}Ω`;
+  if (name === "branch1") {
+    return brokenR1
+      ? `BRANCH 1 → BROKEN / OPEN CIRCUIT
+Current: 0 A`
+      : `BRANCH 1 → V:${fmt(V)}V | I1:${fmt(I1)}A | R1:${fmt(R1)}Ω`;
+  }
+
+  if (name === "branch2") {
+    return brokenR2
+      ? `BRANCH 2 → BROKEN / OPEN CIRCUIT
+Current: 0 A`
+      : `BRANCH 2 → V:${fmt(V)}V | I2:${fmt(I2)}A | R2:${fmt(R2)}Ω`;
+  }
+
+  if (name === "branch3") {
+    return brokenR3
+      ? `BRANCH 3 → BROKEN / OPEN CIRCUIT
+Current: 0 A`
+      : `BRANCH 3 → V:${fmt(V)}V | I3:${fmt(I3)}A | R3:${fmt(R3)}Ω`;
+  }
 
   return `MAIN → V:${fmt(V)}V | I total:${fmt(I)}A | R:${fmt(R)}Ω`;
 }
@@ -656,6 +764,7 @@ function currentInfoByPath(name) {
 function updateScene() {
   geom = buildGeometry();
   wirePaths = [];
+  resistorHits = [];
 
   if (mode === "series") {
     drawSeriesScene(geom);
@@ -686,6 +795,12 @@ c.onclick = (e) => {
   const mx = e.clientX;
   const my = e.clientY;
 
+  const clickedResistor = hitResistor(mx, my);
+  if (clickedResistor) {
+    echo.innerText = currentInfoByResistor(clickedResistor);
+    return;
+  }
+
   const fanX = geom.rightX + 44;
   const fanY = geom.midY;
 
@@ -708,6 +823,7 @@ function loop() {
 
   compute();
   drawGrid();
+  drawTitle();
   updateScene();
   drawFlow();
 }
